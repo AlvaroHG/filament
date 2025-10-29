@@ -28,6 +28,9 @@
 #include <utils/Logger.h>
 #include <utils/Panic.h>
 #include <utils/PrivateImplementation-impl.h>
+#include <cstdio>
+#include <pthread.h>
+#include <unistd.h>
 
 using namespace utils;
 using namespace bluevk;
@@ -57,10 +60,12 @@ const std::string_view DESIRED_LAYERS[] = {
 };
 
 FixedCapacityVector<const char*> getEnabledLayers() {
+    FVK_LOGI << "[VulkanPlatform.cpp:59] getEnabledLayers() - About to enumerate instance layers";
     constexpr size_t kMaxEnabledLayersCount = sizeof(DESIRED_LAYERS) / sizeof(DESIRED_LAYERS[0]);
 
     FixedCapacityVector<VkLayerProperties> const availableLayers
             = fvkutils::enumerate(vkEnumerateInstanceLayerProperties);
+    FVK_LOGI << "[VulkanPlatform.cpp:65] getEnabledLayers() - Enumerated " << availableLayers.size() << " layers";
 
     auto enabledLayers = FixedCapacityVector<const char*>::with_capacity(kMaxEnabledLayersCount);
     for (auto const& desired: DESIRED_LAYERS) {
@@ -134,8 +139,10 @@ void printDeviceInfo(VkInstance instance, VkPhysicalDevice device) {
     int const major = VK_VERSION_MAJOR(deviceProperties.apiVersion);
     int const minor = VK_VERSION_MINOR(deviceProperties.apiVersion);
 
+    FVK_LOGI << "[VulkanPlatform.cpp:137] printDeviceInfo() - About to enumerate physical devices";
     FixedCapacityVector<VkPhysicalDevice> const physicalDevices
             = fvkutils::enumerate(vkEnumeratePhysicalDevices, instance);
+    FVK_LOGI << "[VulkanPlatform.cpp:141] printDeviceInfo() - Enumerated " << physicalDevices.size() << " devices";
 
     FVK_LOGI << "Selected physical device '" << deviceProperties.deviceName << "' from "
                   << physicalDevices.size() << " physical devices. "
@@ -187,9 +194,11 @@ ExtensionSet getInstanceExtensions(ExtensionSet const& externallyRequiredExts = 
 #endif
     };
     ExtensionSet exts;
+    FVK_LOGI << "[VulkanPlatform.cpp:199] getInstanceExtensions() - About to enumerate";
     FixedCapacityVector<VkExtensionProperties> const availableExts =
             fvkutils::enumerate(vkEnumerateInstanceExtensionProperties,
                     static_cast<char const*>(nullptr) /* pLayerName */);
+    FVK_LOGI << "[VulkanPlatform.cpp:204] getInstanceExtensions() - Enumerated " << availableExts.size() << " extensions";
     for (auto const& extension: availableExts) {
         // The cast is to force the non-literal constructor of CString, which assumes
         // null-terminated strings.
@@ -231,9 +240,12 @@ ExtensionSet getDeviceExtensions(VkPhysicalDevice device) {
     };
     ExtensionSet exts;
     // Identify supported physical device extensions
+    FVK_LOGI << "---------[VulkanPlatform.cpp:243] TEST LOG CHANGE";
+    FVK_LOGI << "[VulkanPlatform.cpp:246] getDeviceExtensions() - About to enumerate for device DDDDD";
     FixedCapacityVector<VkExtensionProperties> const extensions
             = fvkutils::enumerate(vkEnumerateDeviceExtensionProperties, device,
                     static_cast<const char*>(nullptr) /* pLayerName */);
+    FVK_LOGI << "[VulkanPlatform.cpp:251] getDeviceExtensions() - Enumerated " << extensions.size() << " extensions";
     for (auto const& extension: extensions) {
         // The cast is to force the non-literal constructor of CString, which assumes
         // null-terminated strings.
@@ -509,8 +521,10 @@ inline int deviceTypeOrder(VkPhysicalDeviceType deviceType) {
 
 VkPhysicalDevice selectPhysicalDevice(VkInstance instance,
         VulkanPlatform::Customization::GPUPreference const& gpuPreference) {
+    FVK_LOGI << "[VulkanPlatform.cpp:528] selectPhysicalDevice() - About to enumerate physical devices";
     FixedCapacityVector<VkPhysicalDevice> const physicalDevices =
             fvkutils::enumerate(vkEnumeratePhysicalDevices, instance);
+    FVK_LOGI << "[VulkanPlatform.cpp:532] selectPhysicalDevice() - Enumerated " << physicalDevices.size() << " devices";
     struct DeviceInfo {
         VkPhysicalDevice device = VK_NULL_HANDLE;
         VkPhysicalDeviceType deviceType = VK_PHYSICAL_DEVICE_TYPE_OTHER;
@@ -689,8 +703,12 @@ void VulkanPlatform::terminate() {
 // This is the main entry point for context creation.
 Driver* VulkanPlatform::createDriver(void* sharedContext,
         Platform::DriverConfig const& driverConfig) {
+    FVK_LOGI << "[VulkanPlatform.cpp:710] createDriver() ENTRY";
+    
     // Load Vulkan entry points.
+    FVK_LOGI << "[VulkanPlatform.cpp:713] About to initialize BlueVK...";
     FILAMENT_CHECK_POSTCONDITION(bluevk::initialize()) << "BlueVK is unable to load entry points.";
+    FVK_LOGI << "[VulkanPlatform.cpp:716] BlueVK initialized successfully";
 
     if (sharedContext) {
         VulkanSharedContext const* scontext = (VulkanSharedContext const*) sharedContext;
@@ -745,11 +763,19 @@ Driver* VulkanPlatform::createDriver(void* sharedContext,
         instExts.merge(getRequiredInstanceExtensions());
     }
     if (mImpl->mInstance == VK_NULL_HANDLE) {
+        FVK_LOGI << "[VulkanPlatform.cpp:764] Creating VkInstance...";
         mImpl->mInstance = createInstance(instExts);
+        FVK_LOGI << "[VulkanPlatform.cpp:766] VkInstance created: " << (void*)mImpl->mInstance;
+        if (mImpl->mInstance == VK_NULL_HANDLE) {
+            FVK_LOGE << "[VulkanPlatform.cpp] ERROR: VkInstance is NULL after createInstance!";
+        }
     }
+    FVK_LOGI << "[VulkanPlatform.cpp:769] VkInstance handle: " << (void*)mImpl->mInstance;
     assert_invariant(mImpl->mInstance != VK_NULL_HANDLE);
 
+    FVK_LOGI << "[VulkanPlatform.cpp:769] Binding VkInstance to BlueVK...";
     bluevk::bindInstance(mImpl->mInstance);
+    FVK_LOGI << "[VulkanPlatform.cpp:770] BlueVK binding complete";
 
     VulkanPlatform::Customization::GPUPreference const pref = getCustomization().gpu;
     bool const hasGPUPreference = pref.index >= 0 || !pref.deviceName.empty();
@@ -757,11 +783,15 @@ Driver* VulkanPlatform::createDriver(void* sharedContext,
             << "Cannot both share context and indicate GPU preference";
 
     if (mImpl->mPhysicalDevice == VK_NULL_HANDLE) {
+        FVK_LOGI << "[VulkanPlatform.cpp:792] Calling selectPhysicalDevice...";
         mImpl->mPhysicalDevice = selectPhysicalDevice(mImpl->mInstance, pref);
+        FVK_LOGI << "[VulkanPlatform.cpp:794] selectPhysicalDevice completed, device: " << (void*)mImpl->mPhysicalDevice;
     }
     assert_invariant(mImpl->mPhysicalDevice != VK_NULL_HANDLE);
 
+    FVK_LOGI << "[VulkanPlatform.cpp:801] Calling printDeviceInfo...";
     printDeviceInfo(mImpl->mInstance, mImpl->mPhysicalDevice);
+    FVK_LOGI << "[VulkanPlatform.cpp:803] printDeviceInfo completed";
 
     VkPhysicalDeviceProtectedMemoryFeatures queryProtectedMemoryFeatures = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROTECTED_MEMORY_FEATURES,
@@ -816,7 +846,9 @@ Driver* VulkanPlatform::createDriver(void* sharedContext,
     ExtensionSet deviceExts;
     // If using a shared context, we do not assume any extensions.
     if (!mImpl->mSharedContext) {
+        FVK_LOGI << "[VulkanPlatform.cpp:845] Getting device extensions...";
         deviceExts = getDeviceExtensions(mImpl->mPhysicalDevice);
+        FVK_LOGI << "[VulkanPlatform.cpp:847] Got " << deviceExts.size() << " device extensions";
         auto [prunedInstExts, prunedDeviceExts] =
                 pruneExtensions(mImpl->mPhysicalDevice, driverConfig, instExts, deviceExts);
         instExts = prunedInstExts;

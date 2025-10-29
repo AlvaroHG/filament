@@ -137,7 +137,9 @@ Engine* FEngine::create(Builder const& builder) {
     FILAMENT_TRACING_ENABLE(FILAMENT_TRACING_CATEGORY_FILAMENT);
     FILAMENT_TRACING_CALL(FILAMENT_TRACING_CATEGORY_FILAMENT);
 
+    LOG(INFO) << "[Engine.cpp:136] FEngine::create() STARTED";
     FEngine* instance = new FEngine(builder);
+    LOG(INFO) << "[Engine.cpp:141] FEngine instance created: " << (void*)instance;
 
     // initialize all fields that need an instance of FEngine
     // (this cannot be done safely in the ctor)
@@ -145,6 +147,7 @@ Engine* FEngine::create(Builder const& builder) {
     // Normally we launch a thread and create the context and Driver from there (see FEngine::loop).
     // In the single-threaded case, we do so in the here and now.
     if constexpr (!UTILS_HAS_THREADING) {
+        LOG(INFO) << "[Engine.cpp:147] Single-threaded mode";
         Platform* platform = builder->mPlatform;
         void* const sharedContext = builder->mSharedContext;
 
@@ -161,13 +164,17 @@ Engine* FEngine::create(Builder const& builder) {
         instance->mDriver = platform->createDriver(sharedContext, getDriverConfig(instance));
 
     } else {
+        LOG(INFO) << "[Engine.cpp:164] Multi-threaded mode - starting driver thread...";
         // start the driver thread
         instance->mDriverThread = std::thread(&FEngine::loop, instance);
+        LOG(INFO) << "[Engine.cpp:166] Driver thread started, waiting for barrier...";
 
         // wait for the driver to be ready
         instance->mDriverBarrier.await();
+        LOG(INFO) << "[Engine.cpp:169] Barrier cleared, checking driver...";
 
         if (UTILS_UNLIKELY(!instance->mDriver)) {
+            LOG(ERROR) << "[Engine.cpp:172] Driver initialization failed!";
             // something went horribly wrong during driver initialization
             instance->mDriverThread.join();
             delete instance;
@@ -756,9 +763,14 @@ bool FEngine::flushAndWait(uint64_t const timeout) {
 // -----------------------------------------------------------------------------------------------
 
 int FEngine::loop() {
+    LOG(INFO) << "===== [Engine.cpp:758] FEngine::loop() THREAD STARTED =====";
+    LOG(INFO) << "[Engine.cpp:759] FEngine::loop Backend: " << (int)mBackend;
+    
     if (mPlatform == nullptr) {
+        LOG(INFO) << "[Engine.cpp:764] Creating platform...";
         mPlatform = PlatformFactory::create(&mBackend);
         mOwnPlatform = true;
+        LOG(INFO) << "[Engine.cpp:767] Platform created: " << (void*)mPlatform;
         LOG(INFO) << "FEngine resolved backend: " << to_string(mBackend);
         if (mPlatform == nullptr) {
             LOG(ERROR) << "Selected backend not supported in this build.";
@@ -770,7 +782,9 @@ int FEngine::loop() {
     JobSystem::setThreadName("FEngine::loop");
     JobSystem::setThreadPriority(JobSystem::Priority::DISPLAY);
 
+    LOG(INFO) << "[Engine.cpp:781] About to call mPlatform->createDriver()...";
     mDriver = mPlatform->createDriver(mSharedGLContext, getDriverConfig(this));
+    LOG(INFO) << "[Engine.cpp:783] Driver created: " << (void*)mDriver;
 
     mDriverBarrier.latch();
     if (UTILS_UNLIKELY(!mDriver)) {

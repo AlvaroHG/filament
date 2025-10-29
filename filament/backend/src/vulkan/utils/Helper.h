@@ -22,6 +22,7 @@
 #include <utils/bitset.h>
 #include <utils/FixedCapacityVector.h>
 #include <utils/Panic.h>
+#include <utils/Log.h>
 
 #include <bluevk/BlueVK.h>
 
@@ -48,10 +49,21 @@ inline bool equivalent(const VkExtent2D& a, const VkExtent2D& b) {
 // here.
 #define EXPAND_ENUM(...)                                                          \
     uint32_t size = 0;                                                            \
+    fprintf(stderr, "[ENUM DEBUG] Calling enumerate function at %s:%d\n", __FILE__, __LINE__); \
+    fflush(stderr); \
     VkResult result = func(__VA_ARGS__, nullptr);                                 \
+    fprintf(stderr, "[ENUM DEBUG] First call result: %d (0x%x), size: %u\n", (int)result, (int)result, (unsigned)size); \
+    fflush(stderr); \
+    if (result != VK_SUCCESS) {                                                   \
+        fprintf(stderr, "[VULKAN ERROR] Enumeration failed with code: %d (0x%x)\n", (int)result, (int)result); \
+        fflush(stderr); \
+    }                                                                             \
     FILAMENT_CHECK_POSTCONDITION(result == VK_SUCCESS) << "enumerate size error"; \
     utils::FixedCapacityVector<OutType> ret(size);                                \
     result = func(__VA_ARGS__, ret.data());                                       \
+    if (result != VK_SUCCESS) {                                                   \
+        utils::slog.e << "Vulkan enumeration (second call) failed with error code: " << (int)result << " (" << result << ")" << utils::io::endl; \
+    }                                                                             \
     FILAMENT_CHECK_POSTCONDITION(result == VK_SUCCESS) << "enumerate error";      \
     return std::move(ret);
 

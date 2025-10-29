@@ -372,6 +372,8 @@ if (LINUX)
             set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
             link_libraries("-static-libgcc -static-libstdc++")
             link_libraries(libc++.a)
+            # add LLVM lib directory to library search path for libc++abi as it was failing in my env
+            link_directories(/usr/lib/llvm-16/lib)
             link_libraries(libc++abi.a)
         endif()
     endif()
