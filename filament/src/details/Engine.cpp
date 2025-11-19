@@ -137,6 +137,7 @@ Engine* FEngine::create(Builder const& builder) {
     FILAMENT_TRACING_ENABLE(FILAMENT_TRACING_CATEGORY_FILAMENT);
     FILAMENT_TRACING_CALL(FILAMENT_TRACING_CATEGORY_FILAMENT);
 
+    // TODO: remove debug logs to track flow
     LOG(INFO) << "[Engine.cpp:136] FEngine::create() STARTED";
     FEngine* instance = new FEngine(builder);
     LOG(INFO) << "[Engine.cpp:141] FEngine instance created: " << (void*)instance;
@@ -763,6 +764,7 @@ bool FEngine::flushAndWait(uint64_t const timeout) {
 // -----------------------------------------------------------------------------------------------
 
 int FEngine::loop() {
+    // debugging fail in python issue
     LOG(INFO) << "===== [Engine.cpp:758] FEngine::loop() THREAD STARTED =====";
     LOG(INFO) << "[Engine.cpp:759] FEngine::loop Backend: " << (int)mBackend;
     

@@ -49,6 +49,13 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <execinfo.h>
+#include <cstdio>
+#include <cstring>
+#include <dlfcn.h>
+#include <cxxabi.h>
+#include <string>
+#include <cstdlib>
 
 using namespace utils;
 
@@ -632,6 +639,111 @@ void FTexture::setExternalStream(FEngine& engine, FStream* stream) noexcept {
     }
 }
 
+namespace {
+    // Helper function to parse offset from backtrace_symbols format
+    // Format: /path/to/lib.so(function+0xOFFSET) [address]
+    uintptr_t parseOffsetFromBacktrace(const char* bt_str) {
+        if (!bt_str) return 0;
+        
+        // Look for pattern: +0xHEX
+        const char* plus_pos = strstr(bt_str, "+0x");
+        if (!plus_pos) {
+            plus_pos = strstr(bt_str, "+0X");
+        }
+        if (plus_pos) {
+            char* endptr;
+            uintptr_t offset = strtoul(plus_pos + 1, &endptr, 16); // +1 to skip '+'
+            if (endptr != plus_pos + 1) {
+                return offset;
+            }
+        }
+        return 0;
+    }
+
+    // Helper function to resolve address to file:line using addr2line
+    std::string resolveAddress(void* addr, const char* bt_str = nullptr) {
+        Dl_info info;
+        if (dladdr(addr, &info) == 0 || !info.dli_fname) {
+            return "??";
+        }
+
+        // Try to parse offset from backtrace_symbols first (most reliable)
+        uintptr_t offset = 0;
+        if (bt_str) {
+            offset = parseOffsetFromBacktrace(bt_str);
+        }
+        
+        // If parsing failed, calculate offset from base address
+        if (offset == 0 && info.dli_fbase) {
+            // Calculate offset from library base address
+            offset = (uintptr_t)addr - (uintptr_t)info.dli_fbase;
+        } else if (offset == 0) {
+            // Last resort: use absolute address (might work for executables)
+            offset = (uintptr_t)addr;
+        }
+
+        char cmd[1024];
+        // Use offset with addr2line - it needs file-relative offsets for shared libraries
+        snprintf(cmd, sizeof(cmd), "addr2line -e %s -f -C -p 0x%lx 2>/dev/null", 
+                 info.dli_fname, offset);
+        
+        FILE* fp = popen(cmd, "r");
+        if (!fp) {
+            return "??";
+        }
+
+        char line[512];
+        std::string result;
+        if (fgets(line, sizeof(line), fp)) {
+            result = line;
+            // Remove trailing newline
+            if (!result.empty() && result.back() == '\n') {
+                result.pop_back();
+            }
+        }
+        pclose(fp);
+        
+        // If addr2line returns "??" or "??:0", it means no debug info or invalid address
+        if (result == "??" || result.find("??:") == 0 || result.empty()) {
+            // Try with absolute address as fallback (for executables)
+            if (info.dli_fbase && offset != (uintptr_t)addr) {
+                snprintf(cmd, sizeof(cmd), "addr2line -e %s -f -C -p %p 2>/dev/null", 
+                         info.dli_fname, addr);
+                fp = popen(cmd, "r");
+                if (fp) {
+                    if (fgets(line, sizeof(line), fp)) {
+                        result = line;
+                        if (!result.empty() && result.back() == '\n') {
+                            result.pop_back();
+                        }
+                    }
+                    pclose(fp);
+                }
+            }
+            
+            if (result == "??" || result.find("??:") == 0 || result.empty()) {
+                result = "?? (no debug info)";
+            }
+        }
+        
+        return result;
+    }
+
+    // Helper function to demangle C++ function names
+    std::string demangle(const char* name) {
+        if (!name) return "??";
+        
+        int status = 0;
+        char* demangled = abi::__cxa_demangle(name, nullptr, nullptr, &status);
+        if (status == 0 && demangled) {
+            std::string result(demangled);
+            free(demangled);
+            return result;
+        }
+        return name;
+    }
+}
+
 void FTexture::generateMipmaps(FEngine& engine) const noexcept {
     FILAMENT_CHECK_PRECONDITION(!mExternal)
             << "External Textures are not mipmappable.";
@@ -644,6 +756,64 @@ void FTexture::generateMipmaps(FEngine& engine) const noexcept {
             << "Texture format " << (unsigned)mFormat << " is not mipmappable.";
 
     auto const& featureFlags = downcast(engine).features.engine.debug;
+
+    // Print stacktrace to see where this function was called from
+    // Note: Requires binaries to be compiled with debug symbols (-g flag)
+    void* callstack[128];
+    int frames = backtrace(callstack, 128);
+    char** strs = backtrace_symbols(callstack, frames);
+    printf("=== STACKTRACE at line 648 ===\n");
+    for (int i = 0; i < frames; ++i) {
+        Dl_info info;
+        void* addr = callstack[i];
+        std::string fileline = "??";
+        std::string funcname = "??";
+        
+        if (dladdr(addr, &info) != 0) {
+            // Always try to resolve the address, even if we don't have a symbol name
+            // Pass backtrace_symbols string to parse offset from it
+            fileline = resolveAddress(addr, strs[i]);
+            
+            if (info.dli_sname) {
+                funcname = demangle(info.dli_sname);
+            } else if (info.dli_fname) {
+                // Extract function name from backtrace_symbols if available
+                // Format is usually: /path/to/lib.so(function+offset) [address]
+                const char* bt_str = strs[i];
+                if (bt_str) {
+                    // Try to extract function name from backtrace_symbols format
+                    const char* func_start = strchr(bt_str, '(');
+                    const char* func_end = strchr(bt_str, '+');
+                    if (func_start && func_end && func_end > func_start) {
+                        funcname = std::string(func_start + 1, func_end - func_start - 1);
+                        if (!funcname.empty()) {
+                            funcname = demangle(funcname.c_str());
+                        }
+                    }
+                }
+            }
+            
+            if (info.dli_fname) {
+                // Calculate and show offset for reference
+                uintptr_t offset = 0;
+                if (info.dli_fbase) {
+                    offset = (uintptr_t)addr - (uintptr_t)info.dli_fbase;
+                }
+                printf("#%d 0x%p in %s at %s [%s+0x%lx]\n", 
+                       i, addr, funcname.c_str(), fileline.c_str(), 
+                       info.dli_fname, offset);
+            } else {
+                printf("#%d 0x%p in %s at %s\n", i, addr, funcname.c_str(), fileline.c_str());
+            }
+        } else {
+            // Fallback to raw backtrace_symbols output
+            printf("#%d %s\n", i, strs[i] ? strs[i] : "??");
+        }
+    }
+    printf("=== END STACKTRACE ===\n");
+    free(strs);
+
+    printf("-- Generating mipmaps for texture, mLevelCount: %d, mWidth: %d, mHeight: %d\n", mLevelCount, mWidth, mHeight);
     FILAMENT_FLAG_GUARDED_CHECK_PRECONDITION(any(mUsage & TextureUsage::GEN_MIPMAPPABLE),
             featureFlags.assert_texture_can_generate_mipmap)
             << "Texture usage does not have GEN_MIPMAPPABLE set";
