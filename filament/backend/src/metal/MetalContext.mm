@@ -64,9 +64,8 @@ void initializeSupportedGpuFamilies(MetalContext* context) {
 
         if ([device supportsFamily:MTLGPUFamilyMac2]) {
             highestSupportedFamily.mac = 2;
-        } else if ([device supportsFamily:MTLGPUFamilyMac1]) {
-            highestSupportedFamily.mac = 1;
         }
+        // MTLGPUFamilyMac1 is deprecated in macOS 13.0+, removed fallback check
     } else {
 #if TARGET_OS_IOS
         using FeatureSet = std::pair<MTLFeatureSet, uint8_t>;

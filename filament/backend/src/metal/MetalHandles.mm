@@ -1522,12 +1522,14 @@ MetalDescriptorSet::MetalDescriptorSet(MetalDescriptorSetLayout* layout) noexcep
 
 void MetalDescriptorSet::finalize(MetalDriver* driver) {
     [driver->mContext->currentRenderPassEncoder useResource:driver->mContext->emptyBuffer
-                                                      usage:MTLResourceUsageRead];
+                                                      usage:MTLResourceUsageRead
+                                                      stages:MTLRenderStageVertex | MTLRenderStageFragment];
     [driver->mContext->currentRenderPassEncoder
             useResource:getOrCreateEmptyTexture(driver->mContext)
-                  usage:MTLResourceUsageRead];
+                  usage:MTLResourceUsageRead
+                  stages:MTLRenderStageVertex | MTLRenderStageFragment];
 
-    if (@available(iOS 13.0, *)) {
+    if (@available(iOS 13.0, macOS 13.0, *)) {
         [driver->mContext->currentRenderPassEncoder useResources:vertexResources.data()
                                                            count:vertexResources.size()
                                                            usage:MTLResourceUsageRead
@@ -1539,10 +1541,12 @@ void MetalDescriptorSet::finalize(MetalDriver* driver) {
     } else {
         [driver->mContext->currentRenderPassEncoder useResources:vertexResources.data()
                                                            count:vertexResources.size()
-                                                           usage:MTLResourceUsageRead];
+                                                           usage:MTLResourceUsageRead
+                                                           stages:MTLRenderStageVertex | MTLRenderStageFragment];
         [driver->mContext->currentRenderPassEncoder useResources:fragmentResources.data()
                                                            count:fragmentResources.size()
-                                                           usage:MTLResourceUsageRead];
+                                                           usage:MTLResourceUsageRead
+                                                           stages:MTLRenderStageVertex | MTLRenderStageFragment];
     }
 }
 
